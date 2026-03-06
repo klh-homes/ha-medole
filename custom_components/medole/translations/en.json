@@ -38,5 +38,17 @@
     "abort": {
       "already_configured": "Device already configured"
     }
+  },
+  "entity": {
+    "select": {
+      "fan_speed": {
+        "name": "Fan Speed",
+        "state": {
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High"
+        }
+      }
+    }
   }
 }

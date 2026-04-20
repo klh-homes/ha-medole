@@ -1,12 +1,11 @@
 {
   "domain": "medole",
   "name": "Medole Dehumidifier",
-  "codeowners": ["@aitjcize"],
+  "codeowners": ["@kirintwn"],
   "config_flow": true,
-  "dependencies": ["modbus"],
-  "documentation": "https://github.com/aitjcize/ha-medole",
+  "documentation": "https://github.com/klh-homes/ha-medole",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/aitjcize/ha-medole/issues",
-  "requirements": ["pymodbus>=3.11.1"],
+  "issue_tracker": "https://github.com/klh-homes/ha-medole/issues",
+  "requirements": ["pymodbus>=3.11.2"],
   "version": "0.1.0"
 }

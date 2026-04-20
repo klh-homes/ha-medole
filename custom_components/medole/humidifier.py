@@ -63,9 +63,7 @@ class MedoleDehumidifierHumidifier(
     _attr_min_humidity = MIN_HUMIDITY
     _attr_max_humidity = MAX_HUMIDITY
 
-    def __init__(
-        self, coordinator: MedoleDataCoordinator, name: str
-    ) -> None:
+    def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         """Initialize the humidifier device."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{name}_humidifier"

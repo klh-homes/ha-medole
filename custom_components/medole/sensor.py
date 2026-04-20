@@ -149,9 +149,7 @@ class MedolePipeTemperatureSensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
-    def __init__(
-        self, coordinator: MedoleDataCoordinator, name: str
-    ) -> None:
+    def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "pipe_temperature")
         self._attr_name = "Pipe Temperature"
 
@@ -168,9 +166,7 @@ class MedoleFanOperationHoursSensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
 
-    def __init__(
-        self, coordinator: MedoleDataCoordinator, name: str
-    ) -> None:
+    def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "fan_operation_hours")
         self._attr_name = "Fan Operation Hours"
 
@@ -186,9 +182,7 @@ class MedoleFanAlarmHoursSensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
 
-    def __init__(
-        self, coordinator: MedoleDataCoordinator, name: str
-    ) -> None:
+    def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "fan_alarm_hours")
         self._attr_name = "Fan Alarm Hours"
 
@@ -200,9 +194,7 @@ class MedoleFanAlarmHoursSensor(MedoleBaseSensor):
 class MedoleStatusSensor(MedoleBaseSensor):
     """Representation of a Medole Status sensor."""
 
-    def __init__(
-        self, coordinator: MedoleDataCoordinator, name: str
-    ) -> None:
+    def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "status")
         self._attr_name = "Status"
 

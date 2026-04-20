@@ -52,9 +52,7 @@ class MedoleFanSpeedSelect(
     _attr_translation_key = "fan_speed"
     _attr_options = FAN_SPEED_OPTIONS
 
-    def __init__(
-        self, coordinator: MedoleDataCoordinator, name: str
-    ) -> None:
+    def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{name}_fan_speed"
         self._attr_device_info = {

@@ -1,4 +1,5 @@
 """DataUpdateCoordinator for the Medole Dehumidifier integration."""
+
 from __future__ import annotations
 
 import logging

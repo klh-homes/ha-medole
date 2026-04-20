@@ -11,7 +11,7 @@ from .modbus import MedoleModbusClient
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.HUMIDIFIER, Platform.SENSOR]
+PLATFORMS = [Platform.HUMIDIFIER, Platform.SENSOR, Platform.SELECT]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -40,16 +40,13 @@
     }
   },
   "entity": {
-    "humidifier": {
-      "medole_dehumidifier": {
-        "state_attributes": {
-          "mode": {
-            "state": {
-              "Low": "低速",
-              "Medium": "中速",
-              "High": "高速"
-            }
-          }
+    "select": {
+      "fan_speed": {
+        "name": "風速",
+        "state": {
+          "low": "低速",
+          "medium": "中速",
+          "high": "高速"
         }
       }
     }

@@ -17,11 +17,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     CONTINUOUS_DEHUMIDIFICATION,
     DOMAIN,
-    FAN_SPEED_HIGH,
     MAX_HUMIDITY,
     MIN_HUMIDITY,
     REG_DEHUMIDIFY_MODE,
-    REG_FAN_SPEED,
     REG_HUMIDITY_1,
     REG_HUMIDITY_SETPOINT,
     REG_OPERATION_STATUS,
@@ -194,10 +192,7 @@ class MedoleDehumidifierHumidifier(HumidifierEntity):
     async def async_set_mode(self, mode: str) -> None:
         """Set new mode."""
         if mode == PRESET_MODE_AIR_PURIFICATION:
-            # Switch to air purification mode with high fan speed
-            await self._client.async_write_register(
-                REG_FAN_SPEED, FAN_SPEED_HIGH
-            )
+            # Switch to air purification mode
             await self._client.async_write_register(REG_DEHUMIDIFY_MODE, 0)
             success = await self._client.async_write_register(
                 REG_PURIFY_MODE, 1
@@ -209,10 +204,7 @@ class MedoleDehumidifierHumidifier(HumidifierEntity):
             else:
                 _LOGGER.error("Failed to set air purification mode")
         elif mode == PRESET_MODE_DEHUMIDIFY:
-            # Switch to dehumidify mode with high fan speed
-            await self._client.async_write_register(
-                REG_FAN_SPEED, FAN_SPEED_HIGH
-            )
+            # Switch to dehumidify mode
             # Enable both purify and dehumidify modes
             await self._client.async_write_register(REG_PURIFY_MODE, 1)
             success = await self._client.async_write_register(
@@ -241,9 +233,6 @@ class MedoleDehumidifierHumidifier(HumidifierEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the device on."""
-        # Set fan speed to high
-        await self._client.async_write_register(REG_FAN_SPEED, FAN_SPEED_HIGH)
-
         # Set the power on
         result = await self._client.async_write_register(REG_POWER, 1)
         if not result:

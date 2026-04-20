@@ -1,7 +1,6 @@
 """Humidifier platform for Medole Dehumidifier integration."""
 
 import logging
-from datetime import timedelta
 
 from homeassistant.components.humidifier import (
     HumidifierAction,
@@ -11,8 +10,9 @@ from homeassistant.components.humidifier import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONTINUOUS_DEHUMIDIFICATION,
@@ -28,15 +28,10 @@ from .const import (
     STATUS_COMPRESSOR_ON,
     STATUS_FAN_ON,
 )
-
-# No need to import modbus functions as we'll use the client methods directly
+from .coordinator import MedoleDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Polling interval
-SCAN_INTERVAL = timedelta(seconds=5)
-
-# Preset modes
 PRESET_MODE_DEHUMIDIFY = "Dehumidify"
 PRESET_MODE_AIR_PURIFICATION = "Air Purification"
 PRESET_MODES = [PRESET_MODE_DEHUMIDIFY, PRESET_MODE_AIR_PURIFICATION]
@@ -49,18 +44,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Medole Dehumidifier humidifier platform."""
     data = hass.data[DOMAIN][config_entry.entry_id]
-    config = data["config"]
-    client = data["client"]
+    coordinator = data["coordinator"]
+    name = data["config"][CONF_NAME]
 
-    name = config[CONF_NAME]
-
-    async_add_entities(
-        [MedoleDehumidifierHumidifier(hass, name, client)],
-        True,
-    )
+    async_add_entities([MedoleDehumidifierHumidifier(coordinator, name)])
 
 
-class MedoleDehumidifierHumidifier(HumidifierEntity):
+class MedoleDehumidifierHumidifier(
+    CoordinatorEntity[MedoleDataCoordinator], HumidifierEntity
+):
     """Representation of a Medole Dehumidifier humidifier device."""
 
     _attr_has_entity_name = True
@@ -71,10 +63,9 @@ class MedoleDehumidifierHumidifier(HumidifierEntity):
     _attr_min_humidity = MIN_HUMIDITY
     _attr_max_humidity = MAX_HUMIDITY
 
-    def __init__(self, hass, name, client):
+    def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         """Initialize the humidifier device."""
-        self.hass = hass
-        self._client = client
+        super().__init__(coordinator)
         self._attr_unique_id = f"{name}_humidifier"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._attr_unique_id)},
@@ -82,180 +73,113 @@ class MedoleDehumidifierHumidifier(HumidifierEntity):
             "manufacturer": "Medole",
             "model": "IN-D17",
         }
-
-        # Initialize state variables
-        self._attr_current_humidity = None
-        self._attr_target_humidity = None
-        self._attr_mode = None
-        self._attr_is_on = False
-        self._attr_action = None
+        # Remembered so async_turn_on can restore the last picked preset.
         self._current_preset = PRESET_MODE_DEHUMIDIFY
+        self._update_from_coordinator()
 
     @property
-    def current_humidity(self):
-        """Return current humidity to set with the ring."""
-        return self._attr_current_humidity
+    def _client(self):
+        """Modbus client used for writes — reads go through the coordinator."""
+        return self.coordinator.client
 
-    @property
-    def target_humidity(self):
-        """Return target humidity to set with the ring."""
-        return self._attr_target_humidity
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Pull fresh state from the coordinator and schedule an HA update."""
+        self._update_from_coordinator()
+        super()._handle_coordinator_update()
 
-    @property
-    def min_humidity(self):
-        """Return minimum humidity settable with the ring."""
-        return self._attr_min_humidity
+    def _update_from_coordinator(self) -> None:
+        """Derive entity attributes from the coordinator's latest snapshot."""
+        data = self.coordinator.data or {}
 
-    @property
-    def max_humidity(self):
-        """Return maximum humidity settable with the ring."""
-        return self._attr_max_humidity
+        power = data.get(REG_POWER)
+        self._attr_is_on = power == 1
 
-    async def async_update(self) -> None:
-        """Update the state of the humidifier device."""
-        # Get power status
-        power_result = await self._client.async_read_register(REG_POWER)
-        if power_result:
-            power_status = power_result.registers[0]
-            self._attr_is_on = power_status == 1
+        status = data.get(REG_OPERATION_STATUS)
+        if status is None:
+            self._attr_action = None
+        elif not self._attr_is_on:
+            self._attr_action = HumidifierAction.OFF
+        elif status & STATUS_COMPRESSOR_ON:
+            self._attr_action = HumidifierAction.DRYING
+        elif status & STATUS_FAN_ON:
+            self._attr_action = HumidifierAction.IDLE
         else:
-            _LOGGER.error("Failed to read power status")
-            return
+            self._attr_action = HumidifierAction.IDLE
 
-        # Get the operation status register
-        status_result = await self._client.async_read_register(
-            REG_OPERATION_STATUS
-        )
+        setpoint = data.get(REG_HUMIDITY_SETPOINT)
+        if setpoint is not None:
+            self._attr_target_humidity = (
+                MIN_HUMIDITY
+                if setpoint == CONTINUOUS_DEHUMIDIFICATION
+                else setpoint
+            )
 
-        if status_result:
-            status = status_result.registers[0]
-            compressor_on = status & STATUS_COMPRESSOR_ON
-            fan_on = status & STATUS_FAN_ON
-
-            # Determine action based on operation status
-            if not self._attr_is_on:
-                self._attr_action = HumidifierAction.OFF
-            elif compressor_on:
-                self._attr_action = HumidifierAction.DRYING
-            elif fan_on:
-                self._attr_action = HumidifierAction.IDLE
-            else:
-                self._attr_action = HumidifierAction.IDLE
+        dehumidify_on = data.get(REG_DEHUMIDIFY_MODE) == 1
+        purify_on = data.get(REG_PURIFY_MODE) == 1
+        if dehumidify_on:
+            self._current_preset = PRESET_MODE_DEHUMIDIFY
+            self._attr_mode = PRESET_MODE_DEHUMIDIFY
+        elif purify_on:
+            self._current_preset = PRESET_MODE_AIR_PURIFICATION
+            self._attr_mode = PRESET_MODE_AIR_PURIFICATION
         else:
-            _LOGGER.error("Failed to read operation status")
+            self._attr_mode = PRESET_MODE_DEHUMIDIFY
 
-        # Get the humidity setpoint
-        setpoint_result = await self._client.async_read_register(
-            REG_HUMIDITY_SETPOINT
-        )
-
-        if setpoint_result:
-            humidity_setpoint = setpoint_result.registers[0]
-            if humidity_setpoint == CONTINUOUS_DEHUMIDIFICATION:
-                # For continuous mode, set to minimum
-                self._attr_target_humidity = MIN_HUMIDITY
-            else:
-                self._attr_target_humidity = humidity_setpoint
-        else:
-            _LOGGER.error("Failed to read humidity setpoint")
-
-        # Check which mode is active (dehumidify or air purification)
-        dehumidify_result = await self._client.async_read_register(
-            REG_DEHUMIDIFY_MODE
-        )
-        purify_result = await self._client.async_read_register(REG_PURIFY_MODE)
-
-        if dehumidify_result and purify_result:
-            dehumidify_on = dehumidify_result.registers[0] == 1
-            purify_on = purify_result.registers[0] == 1
-
-            # Prioritize showing dehumidify mode when both are active
-            if dehumidify_on:
-                self._current_preset = PRESET_MODE_DEHUMIDIFY
-                self._attr_mode = PRESET_MODE_DEHUMIDIFY
-            elif purify_on:
-                self._current_preset = PRESET_MODE_AIR_PURIFICATION
-                self._attr_mode = PRESET_MODE_AIR_PURIFICATION
-            else:
-                # Neither mode is active
-                self._current_preset = PRESET_MODE_DEHUMIDIFY
-                self._attr_mode = PRESET_MODE_DEHUMIDIFY
-
-        # Get the current humidity
-        humidity_result = await self._client.async_read_register(REG_HUMIDITY_1)
-
-        if humidity_result:
-            self._attr_current_humidity = humidity_result.registers[0]
-        else:
-            _LOGGER.error("Failed to read current humidity")
+        humidity = data.get(REG_HUMIDITY_1)
+        if humidity is not None:
+            self._attr_current_humidity = humidity
 
     async def async_set_mode(self, mode: str) -> None:
         """Set new mode."""
         if mode == PRESET_MODE_AIR_PURIFICATION:
-            # Switch to air purification mode
             await self._client.async_write_register(REG_DEHUMIDIFY_MODE, 0)
             success = await self._client.async_write_register(
                 REG_PURIFY_MODE, 1
             )
             if success:
                 self._current_preset = PRESET_MODE_AIR_PURIFICATION
-                self._attr_mode = mode
-                _LOGGER.info("Switched to air purification mode")
-            else:
-                _LOGGER.error("Failed to set air purification mode")
         elif mode == PRESET_MODE_DEHUMIDIFY:
-            # Switch to dehumidify mode
-            # Enable both purify and dehumidify modes
             await self._client.async_write_register(REG_PURIFY_MODE, 1)
             success = await self._client.async_write_register(
                 REG_DEHUMIDIFY_MODE, 1
             )
             if success:
                 self._current_preset = PRESET_MODE_DEHUMIDIFY
-                self._attr_mode = PRESET_MODE_DEHUMIDIFY
-                _LOGGER.info("Switched to dehumidify mode")
-            else:
-                _LOGGER.error("Failed to set dehumidify mode")
+        else:
+            _LOGGER.error("Unknown mode: %s", mode)
+            return
+
+        if not success:
+            _LOGGER.error("Failed to set mode to %s", mode)
+        await self.coordinator.async_request_refresh()
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
-        # Ensure humidity is within valid range
         humidity = max(MIN_HUMIDITY, min(MAX_HUMIDITY, humidity))
 
-        success = await self._client.async_write_register(
+        if not await self._client.async_write_register(
             REG_HUMIDITY_SETPOINT, humidity
-        )
-
-        if success:
-            self._attr_target_humidity = humidity
-        else:
+        ):
             _LOGGER.error("Failed to set humidity to %s", humidity)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self, **kwargs) -> None:
-        """Turn the device on."""
-        # Set the power on
-        result = await self._client.async_write_register(REG_POWER, 1)
-        if not result:
+        """Turn the device on and restore the previous preset."""
+        if not await self._client.async_write_register(REG_POWER, 1):
             _LOGGER.error("Failed to turn on device")
 
-        # Restore the previous preset mode
         if self._current_preset == PRESET_MODE_AIR_PURIFICATION:
-            # Air purification only
             await self._client.async_write_register(REG_DEHUMIDIFY_MODE, 0)
             await self._client.async_write_register(REG_PURIFY_MODE, 1)
         else:
-            # Dehumidify mode (with air purification)
             await self._client.async_write_register(REG_PURIFY_MODE, 1)
             await self._client.async_write_register(REG_DEHUMIDIFY_MODE, 1)
 
-        self._attr_is_on = True
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the device off."""
-        # Set power off
-        success = await self._client.async_write_register(REG_POWER, 0)
-
-        if success:
-            self._attr_is_on = False
-        else:
+        if not await self._client.async_write_register(REG_POWER, 0):
             _LOGGER.error("Failed to turn power off")
+        await self.coordinator.async_request_refresh()

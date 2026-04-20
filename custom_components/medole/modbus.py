@@ -117,7 +117,7 @@ class MedoleModbusClient:
             return ModbusTcpClient(
                 host=host,
                 port=port,
-                timeout=3,
+                timeout=1,
                 framer="rtu",
             )
 
@@ -125,7 +125,7 @@ class MedoleModbusClient:
         return ModbusTcpClient(
             host=host,
             port=port,
-            timeout=3,
+            timeout=1,
         )
 
     def _throttle_request(self):
@@ -135,9 +135,15 @@ class MedoleModbusClient:
             time.sleep(self._min_delay - elapsed)
         self._last_request_time = time.time()
 
-    def _ensure_connection(self) -> bool:
-        """Ensure the client is connected."""
-        # Check if already connected using pymodbus's own connection tracking
+    async def _ensure_connection(self) -> bool:
+        """Ensure the client is connected.
+
+        client.connect() is a blocking socket operation — when the device
+        is unreachable it blocks for the full TCP timeout. It MUST run in
+        the executor, never on the event loop thread, or every other
+        coroutine in Home Assistant (MQTT, Supervisor API, other
+        integrations) gets frozen during the connect attempt.
+        """
         is_connected = False
         try:
             if hasattr(self.client, "connected"):
@@ -152,14 +158,13 @@ class MedoleModbusClient:
         if is_connected:
             return True
 
-        # Not connected, attempt to connect
         _LOGGER.debug("Modbus not connected, attempting to connect...")
-        if self.client.connect():
+        connected = await self.hass.async_add_executor_job(self.client.connect)
+        if connected:
             _LOGGER.debug("Modbus connection established")
             return True
-        else:
-            _LOGGER.error("Failed to establish Modbus connection")
-            return False
+        _LOGGER.error("Failed to establish Modbus connection")
+        return False
 
     async def async_read_register(
         self, address: int, count: int = 1
@@ -167,7 +172,7 @@ class MedoleModbusClient:
         """Read a register with proper connection handling and locking."""
         try:
             async with self.lock:
-                if not self._ensure_connection():
+                if not await self._ensure_connection():
                     return None
 
                 # Throttle requests to avoid overwhelming the device
@@ -213,7 +218,7 @@ class MedoleModbusClient:
         """Write a register with proper connection handling and locking."""
         try:
             async with self.lock:
-                if not self._ensure_connection():
+                if not await self._ensure_connection():
                     return False
 
                 # Throttle requests to avoid overwhelming the device
@@ -261,7 +266,7 @@ class MedoleModbusClient:
         """Write multiple registers with proper connection handling and locking."""
         try:
             async with self.lock:
-                if not self._ensure_connection():
+                if not await self._ensure_connection():
                     return False
 
                 # Throttle requests to avoid overwhelming the device

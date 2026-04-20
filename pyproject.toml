@@ -37,7 +37,7 @@ lint.ignore = [
     "E501",  # line too long, handled by black
     "C901",  # too complex
 ]
-target-version = "py311"
+target-version = "py313"
 line-length = 80
 
 [tool.ruff.lint.isort]

@@ -27,14 +27,24 @@ The integration can be configured through the Home Assistant UI. You'll need to 
 
 ## Development
 
-This project includes a Makefile with various targets for development:
+Requires Python 3.14 (matching the Home Assistant runtime version this integration targets). Create a virtual environment and install dev dependencies:
 
 ```bash
-# Install development dependencies (in a virtual environment)
-make install-dev
+make setup-venv
+source .venv/bin/activate
+```
 
+Makefile targets:
+
+```bash
 # Run linters
 make lint
+
+# Run the pytest suite + mock server smoke test
+make test
+
+# Run just the pytest suite
+make test-pytest
 
 # Format code
 make format

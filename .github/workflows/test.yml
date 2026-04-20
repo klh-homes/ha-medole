@@ -9,13 +9,17 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # HA 2026.3.4 supports >=3.13.2,<3.15 — cover both supported minors.
+        python-version: ['3.13', '3.14']
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
         with:
-          # Must match the minimum supported by the pinned homeassistant.
-          python-version: '3.13'
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements.txt
       - name: Install dependencies

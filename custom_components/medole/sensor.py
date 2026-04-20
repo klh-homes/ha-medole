@@ -1,7 +1,6 @@
 """Sensor platform for Medole Dehumidifier integration."""
 
 import logging
-from datetime import timedelta
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -16,6 +15,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_NAME,
@@ -39,11 +39,9 @@ from .const import (
     STATUS_ROOM_TEMP_ERROR,
     STATUS_WATER_FULL_ERROR,
 )
+from .coordinator import MedoleDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-# Polling interval
-SCAN_INTERVAL = timedelta(seconds=5)
 
 
 async def async_setup_entry(
@@ -53,31 +51,32 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Medole Dehumidifier sensor platform."""
     data = hass.data[DOMAIN][config_entry.entry_id]
-    config = data["config"]
-    client = data["client"]
-
-    name = config[CONF_NAME]
+    coordinator = data["coordinator"]
+    name = data["config"][CONF_NAME]
 
     entities = [
-        MedoleTemperatureSensor(hass, name, client, 1),
-        MedoleHumiditySensor(hass, name, client, 1),
-        MedolePipeTemperatureSensor(hass, name, client),
-        MedoleFanOperationHoursSensor(hass, name, client),
-        MedoleFanAlarmHoursSensor(hass, name, client),
-        MedoleStatusSensor(hass, name, client),
+        MedoleTemperatureSensor(coordinator, name, 1),
+        MedoleHumiditySensor(coordinator, name, 1),
+        MedolePipeTemperatureSensor(coordinator, name),
+        MedoleFanOperationHoursSensor(coordinator, name),
+        MedoleFanAlarmHoursSensor(coordinator, name),
+        MedoleStatusSensor(coordinator, name),
     ]
-    async_add_entities(entities, True)
+    async_add_entities(entities)
 
 
-class MedoleBaseSensor(SensorEntity):
+class MedoleBaseSensor(CoordinatorEntity[MedoleDataCoordinator], SensorEntity):
     """Base class for Medole Dehumidifier sensors."""
 
     _attr_has_entity_name = True
 
-    def __init__(self, hass, name, client, sensor_type):
-        """Initialize the sensor."""
-        self.hass = hass
-        self._client = client
+    def __init__(
+        self,
+        coordinator: MedoleDataCoordinator,
+        name: str,
+        sensor_type: str,
+    ) -> None:
+        super().__init__(coordinator)
         self._attr_unique_id = f"{name}_{sensor_type}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{name}_humidifier")},
@@ -87,6 +86,13 @@ class MedoleBaseSensor(SensorEntity):
         }
 
 
+def _decode_temperature(register_value: int) -> float:
+    """Temperature format: lo-byte = integer degrees, hi-byte = 0.1°C decimal."""
+    integer_part = register_value & 0xFF
+    decimal_part = (register_value >> 8) & 0xFF
+    return integer_part + decimal_part / 10
+
+
 class MedoleTemperatureSensor(MedoleBaseSensor):
     """Representation of a Medole Temperature sensor."""
 
@@ -94,27 +100,22 @@ class MedoleTemperatureSensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
-    def __init__(self, hass, name, client, sensor_number):
-        """Initialize the temperature sensor."""
-        super().__init__(hass, name, client, f"temperature_{sensor_number}")
-        self._sensor_number = sensor_number
+    def __init__(
+        self,
+        coordinator: MedoleDataCoordinator,
+        name: str,
+        sensor_number: int,
+    ) -> None:
+        super().__init__(coordinator, name, f"temperature_{sensor_number}")
         self._attr_name = "Temperature"
         self._register = (
             REG_TEMPERATURE_1 if sensor_number == 1 else REG_TEMPERATURE_2
         )
 
-    async def async_update(self) -> None:
-        """Update the state of the sensor."""
-        result = await self._client.async_read_register(self._register)
-
-        if result:
-            # Temperature format: Hi Byte = decimal, Lo Byte = integer
-            temp_value = result.registers[0]
-            integer_part = temp_value & 0xFF
-            decimal_part = (temp_value >> 8) & 0xFF
-            self._attr_native_value = integer_part + decimal_part / 10
-        else:
-            self._attr_native_value = None
+    @property
+    def native_value(self) -> float | None:
+        raw = (self.coordinator.data or {}).get(self._register)
+        return _decode_temperature(raw) if raw is not None else None
 
 
 class MedoleHumiditySensor(MedoleBaseSensor):
@@ -124,23 +125,21 @@ class MedoleHumiditySensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
 
-    def __init__(self, hass, name, client, sensor_number):
-        """Initialize the humidity sensor."""
-        super().__init__(hass, name, client, f"humidity_{sensor_number}")
-        self._sensor_number = sensor_number
+    def __init__(
+        self,
+        coordinator: MedoleDataCoordinator,
+        name: str,
+        sensor_number: int,
+    ) -> None:
+        super().__init__(coordinator, name, f"humidity_{sensor_number}")
         self._attr_name = "Humidity"
         self._register = (
             REG_HUMIDITY_1 if sensor_number == 1 else REG_HUMIDITY_2
         )
 
-    async def async_update(self) -> None:
-        """Update the state of the sensor."""
-        result = await self._client.async_read_register(self._register)
-
-        if result:
-            self._attr_native_value = result.registers[0]
-        else:
-            self._attr_native_value = None
+    @property
+    def native_value(self) -> int | None:
+        return (self.coordinator.data or {}).get(self._register)
 
 
 class MedolePipeTemperatureSensor(MedoleBaseSensor):
@@ -150,19 +149,16 @@ class MedolePipeTemperatureSensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
-    def __init__(self, hass, name, client):
-        """Initialize the pipe temperature sensor."""
-        super().__init__(hass, name, client, "pipe_temperature")
+    def __init__(
+        self, coordinator: MedoleDataCoordinator, name: str
+    ) -> None:
+        super().__init__(coordinator, name, "pipe_temperature")
         self._attr_name = "Pipe Temperature"
 
-    async def async_update(self) -> None:
-        """Update the state of the sensor."""
-        result = await self._client.async_read_register(REG_PIPE_TEMPERATURE)
-
-        if result:
-            self._attr_native_value = result.registers[0] / 10.0
-        else:
-            self._attr_native_value = None
+    @property
+    def native_value(self) -> float | None:
+        raw = (self.coordinator.data or {}).get(REG_PIPE_TEMPERATURE)
+        return raw / 10.0 if raw is not None else None
 
 
 class MedoleFanOperationHoursSensor(MedoleBaseSensor):
@@ -172,19 +168,15 @@ class MedoleFanOperationHoursSensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
 
-    def __init__(self, hass, name, client):
-        """Initialize the fan operation hours sensor."""
-        super().__init__(hass, name, client, "fan_operation_hours")
+    def __init__(
+        self, coordinator: MedoleDataCoordinator, name: str
+    ) -> None:
+        super().__init__(coordinator, name, "fan_operation_hours")
         self._attr_name = "Fan Operation Hours"
 
-    async def async_update(self) -> None:
-        """Update the state of the sensor."""
-        result = await self._client.async_read_register(REG_FAN_OPERATION_HOURS)
-
-        if result:
-            self._attr_native_value = result.registers[0]
-        else:
-            self._attr_native_value = None
+    @property
+    def native_value(self) -> int | None:
+        return (self.coordinator.data or {}).get(REG_FAN_OPERATION_HOURS)
 
 
 class MedoleFanAlarmHoursSensor(MedoleBaseSensor):
@@ -194,46 +186,45 @@ class MedoleFanAlarmHoursSensor(MedoleBaseSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
 
-    def __init__(self, hass, name, client):
-        """Initialize the fan alarm hours sensor."""
-        super().__init__(hass, name, client, "fan_alarm_hours")
+    def __init__(
+        self, coordinator: MedoleDataCoordinator, name: str
+    ) -> None:
+        super().__init__(coordinator, name, "fan_alarm_hours")
         self._attr_name = "Fan Alarm Hours"
 
-    async def async_update(self) -> None:
-        """Update the state of the sensor."""
-        result = await self._client.async_read_register(REG_FAN_ALARM_HOURS)
-
-        if result:
-            self._attr_native_value = result.registers[0]
-        else:
-            self._attr_native_value = None
+    @property
+    def native_value(self) -> int | None:
+        return (self.coordinator.data or {}).get(REG_FAN_ALARM_HOURS)
 
 
 class MedoleStatusSensor(MedoleBaseSensor):
     """Representation of a Medole Status sensor."""
 
-    def __init__(self, hass, name, client):
-        """Initialize the status sensor."""
-        super().__init__(hass, name, client, "status")
+    def __init__(
+        self, coordinator: MedoleDataCoordinator, name: str
+    ) -> None:
+        super().__init__(coordinator, name, "status")
         self._attr_name = "Status"
-        self._status_value = None
-        self._dehumidify_mode = None
-        self._purify_mode = None
+
+    def _status_value(self) -> int | None:
+        return (self.coordinator.data or {}).get(REG_OPERATION_STATUS)
+
+    def _mode(self, register: int) -> bool:
+        return (self.coordinator.data or {}).get(register) == 1
 
     @property
-    def extra_state_attributes(self):
-        """Return the state attributes."""
-        if self._status_value is None:
+    def extra_state_attributes(self) -> dict:
+        status = self._status_value()
+        if status is None:
             return {}
 
-        lo_byte = self._status_value & 0xFF
-        hi_byte = (self._status_value >> 8) & 0xFF
-
+        lo_byte = status & 0xFF
+        hi_byte = (status >> 8) & 0xFF
         return {
             "compressor_on": bool(lo_byte & STATUS_COMPRESSOR_ON),
             "fan_on": bool(lo_byte & STATUS_FAN_ON),
-            "dehumidify_mode": bool(self._dehumidify_mode),
-            "air_purification_mode": bool(self._purify_mode),
+            "dehumidify_mode": self._mode(REG_DEHUMIDIFY_MODE),
+            "air_purification_mode": self._mode(REG_PURIFY_MODE),
             "pipe_temp_error": bool(lo_byte & STATUS_PIPE_TEMP_ERROR),
             "humidity_sensor_error": bool(
                 lo_byte & STATUS_HUMIDITY_SENSOR_ERROR
@@ -248,58 +239,37 @@ class MedoleStatusSensor(MedoleBaseSensor):
             ),
         }
 
-    async def async_update(self) -> None:
-        """Update the state of the sensor."""
-        result = await self._client.async_read_register(REG_OPERATION_STATUS)
+    @property
+    def native_value(self) -> str | None:
+        status = self._status_value()
+        if status is None:
+            return None
 
-        if result:
-            self._status_value = result.registers[0]
+        lo_byte = status & 0xFF
+        hi_byte = (status >> 8) & 0xFF
 
-            # Read mode registers
-            dehumidify_result = await self._client.async_read_register(
+        errors = []
+        if lo_byte & STATUS_PIPE_TEMP_ERROR:
+            errors.append("pipe_temp_error")
+        if lo_byte & STATUS_HUMIDITY_SENSOR_ERROR:
+            errors.append("humidity_sensor_error")
+        if lo_byte & STATUS_ROOM_TEMP_ERROR:
+            errors.append("room_temp_error")
+        if lo_byte & STATUS_WATER_FULL_ERROR:
+            errors.append("water_full_error")
+        if hi_byte & (STATUS_HIGH_PRESSURE_ERROR >> 8):
+            errors.append("high_pressure_error")
+        if hi_byte & (STATUS_LOW_PRESSURE_ERROR >> 8):
+            errors.append("low_pressure_error")
+
+        if errors:
+            return "Error: " + ", ".join(errors)
+        if lo_byte & STATUS_COMPRESSOR_ON:
+            return "Dehumidifying"
+        if lo_byte & STATUS_FAN_ON:
+            if self._mode(REG_PURIFY_MODE) and not self._mode(
                 REG_DEHUMIDIFY_MODE
-            )
-            purify_result = await self._client.async_read_register(
-                REG_PURIFY_MODE
-            )
-
-            if dehumidify_result:
-                self._dehumidify_mode = dehumidify_result.registers[0] == 1
-            if purify_result:
-                self._purify_mode = purify_result.registers[0] == 1
-
-            # Set the state based on errors
-            errors = []
-            lo_byte = self._status_value & 0xFF
-            hi_byte = (self._status_value >> 8) & 0xFF
-
-            if lo_byte & STATUS_PIPE_TEMP_ERROR:
-                errors.append("pipe_temp_error")
-            if lo_byte & STATUS_HUMIDITY_SENSOR_ERROR:
-                errors.append("humidity_sensor_error")
-            if lo_byte & STATUS_ROOM_TEMP_ERROR:
-                errors.append("room_temp_error")
-            if lo_byte & STATUS_WATER_FULL_ERROR:
-                errors.append("water_full_error")
-            if hi_byte & (STATUS_HIGH_PRESSURE_ERROR >> 8):
-                errors.append("high_pressure_error")
-            if hi_byte & (STATUS_LOW_PRESSURE_ERROR >> 8):
-                errors.append("low_pressure_error")
-
-            if errors:
-                self._attr_native_value = "Error: " + ", ".join(errors)
-            elif lo_byte & STATUS_COMPRESSOR_ON:
-                self._attr_native_value = "Dehumidifying"
-            elif lo_byte & STATUS_FAN_ON:
-                # Fan running - check mode
-                if self._purify_mode and not self._dehumidify_mode:
-                    self._attr_native_value = "Air Purification"
-                else:
-                    self._attr_native_value = "Fan Only"
-            else:
-                self._attr_native_value = "Idle"
-        else:
-            self._attr_native_value = "Communication Error"
-            self._status_value = None
-            self._dehumidify_mode = None
-            self._purify_mode = None
+            ):
+                return "Air Purification"
+            return "Fan Only"
+        return "Idle"

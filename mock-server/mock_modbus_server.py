@@ -39,9 +39,9 @@ from medole_registers import (
     STATUS_FAN_ON,
 )
 from pymodbus.datastore import (
+    ModbusDeviceContext,
     ModbusSequentialDataBlock,
     ModbusServerContext,
-    ModbusSlaveContext,
 )
 from pymodbus.server import StartAsyncTcpServer
 
@@ -75,10 +75,10 @@ class MedoleDehumidifierMockServer:
 
         # Create a data block with zeros
         block = ModbusSequentialDataBlock(0, [0] * 0x7000)
-        # Create the slave context
-        self.context = ModbusSlaveContext(hr=block)
-        # Create the server context with slave ID 1
-        self.server_context = ModbusServerContext(slaves={1: self.context}, single=False)
+        # Create the device context
+        self.context = ModbusDeviceContext(hr=block)
+        # Create the server context with device ID 1
+        self.server_context = ModbusServerContext(devices={1: self.context}, single=False)
 
     def set_initial_values(self):
         # Set initial values for registers

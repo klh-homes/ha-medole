@@ -1,4 +1,4 @@
-.PHONY: lint format check clean test test-mock-server setup-venv
+.PHONY: lint format check clean test test-mock-server test-pytest setup-venv
 
 # Python files
 PYTHON_FILES := $(shell find custom_components -name "*.py")
@@ -40,7 +40,11 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type f -name ".coverage" -delete
 
-test: test-mock-server
+test: test-pytest test-mock-server
+
+# Run pytest suite (unit + integration against mock server)
+test-pytest:
+	python -m pytest tests/ -v
 
 # Run mock server tests (for CI)
 test-mock-server:
@@ -65,5 +69,7 @@ help:
 	@echo "  format     : Format code with black and isort"
 	@echo "  check      : Check formatting without making changes"
 	@echo "  clean      : Clean up cache files"
-	@echo "  test-mock-server : Run the mock Modbus server tests"
+	@echo "  test       : Run all tests (pytest + mock server smoke test)"
+	@echo "  test-pytest      : Run the pytest unit/integration suite"
+	@echo "  test-mock-server : Run the mock Modbus server smoke test"
 	@echo "  help       : Show this help message"

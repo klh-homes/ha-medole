@@ -56,10 +56,15 @@ _LOGGER = logging.getLogger(__name__)
 class MedoleDehumidifierMockServer:
     """Mock Modbus server for Medole Dehumidifier."""
 
-    def __init__(self, host="localhost", port=5020):
-        """Initialize the mock server."""
+    def __init__(self, host="localhost", port=5020, simulate=True):
+        """Initialize the mock server.
+
+        When simulate is False, the background thread that randomly mutates
+        register values is not started — useful for deterministic tests.
+        """
         self.host = host
         self.port = port
+        self.simulate = simulate
         self.server = None
         self.server_thread = None
         self.running = False
@@ -226,10 +231,14 @@ class MedoleDehumidifierMockServer:
 
         self.running = True
 
-        # Start the sensor update thread
-        self.update_thread = Thread(target=self.update_sensor_values)
-        self.update_thread.daemon = True
-        self.update_thread.start()
+        # Start the sensor update thread (skipped in simulate=False mode)
+        if self.simulate:
+            self.update_thread = Thread(target=self.update_sensor_values)
+            self.update_thread.daemon = True
+            self.update_thread.start()
+        else:
+            # Still populate initial values so registers are non-zero
+            self.set_initial_values()
 
         # Start the Modbus server
         _LOGGER.info(f"Starting mock Modbus server on {self.host}:{self.port}")

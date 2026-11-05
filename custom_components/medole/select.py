@@ -20,8 +20,6 @@ from .coordinator import MedoleDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-FAN_SPEED_OPTIONS = ["low", "medium", "high"]
-
 FAN_SPEED_MAP = {
     "low": FAN_SPEED_LOW,
     "medium": FAN_SPEED_MEDIUM,
@@ -50,7 +48,8 @@ class MedoleFanSpeedSelect(
 
     _attr_has_entity_name = True
     _attr_translation_key = "fan_speed"
-    _attr_options = FAN_SPEED_OPTIONS
+    _attr_icon = "mdi:fan"
+    _attr_options = list(FAN_SPEED_MAP)
 
     def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator)
@@ -67,9 +66,21 @@ class MedoleFanSpeedSelect(
         raw = (self.coordinator.data or {}).get(REG_FAN_SPEED)
         return FAN_SPEED_REVERSE_MAP.get(raw) if raw is not None else None
 
+    @property
+    def available(self) -> bool:
+        """Require the fan-speed register in addition to coordinator health."""
+        return (
+            super().available
+            and (self.coordinator.data or {}).get(REG_FAN_SPEED) is not None
+        )
+
     async def async_select_option(self, option: str) -> None:
         """Write selected fan speed to device."""
-        speed_value = FAN_SPEED_MAP.get(option, FAN_SPEED_HIGH)
+        speed_value = FAN_SPEED_MAP.get(option)
+        if speed_value is None:
+            _LOGGER.error("Invalid fan speed option: %s", option)
+            return
+
         success = await self.coordinator.client.async_write_register(
             REG_FAN_SPEED, speed_value
         )

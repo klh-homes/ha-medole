@@ -69,6 +69,7 @@ class MedoleBaseSensor(CoordinatorEntity[MedoleDataCoordinator], SensorEntity):
     """Base class for Medole Dehumidifier sensors."""
 
     _attr_has_entity_name = True
+    _register: int
 
     def __init__(
         self,
@@ -84,6 +85,14 @@ class MedoleBaseSensor(CoordinatorEntity[MedoleDataCoordinator], SensorEntity):
             "manufacturer": "Medole",
             "model": "IN-D17",
         }
+
+    @property
+    def available(self) -> bool:
+        """Require this sensor's register in addition to coordinator health."""
+        return (
+            super().available
+            and (self.coordinator.data or {}).get(self._register) is not None
+        )
 
 
 def _decode_temperature(register_value: int) -> float:
@@ -152,10 +161,11 @@ class MedolePipeTemperatureSensor(MedoleBaseSensor):
     def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "pipe_temperature")
         self._attr_name = "Pipe Temperature"
+        self._register = REG_PIPE_TEMPERATURE
 
     @property
     def native_value(self) -> float | None:
-        raw = (self.coordinator.data or {}).get(REG_PIPE_TEMPERATURE)
+        raw = (self.coordinator.data or {}).get(self._register)
         return raw / 10.0 if raw is not None else None
 
 
@@ -169,10 +179,11 @@ class MedoleFanOperationHoursSensor(MedoleBaseSensor):
     def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "fan_operation_hours")
         self._attr_name = "Fan Operation Hours"
+        self._register = REG_FAN_OPERATION_HOURS
 
     @property
     def native_value(self) -> int | None:
-        return (self.coordinator.data or {}).get(REG_FAN_OPERATION_HOURS)
+        return (self.coordinator.data or {}).get(self._register)
 
 
 class MedoleFanAlarmHoursSensor(MedoleBaseSensor):
@@ -185,10 +196,11 @@ class MedoleFanAlarmHoursSensor(MedoleBaseSensor):
     def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "fan_alarm_hours")
         self._attr_name = "Fan Alarm Hours"
+        self._register = REG_FAN_ALARM_HOURS
 
     @property
     def native_value(self) -> int | None:
-        return (self.coordinator.data or {}).get(REG_FAN_ALARM_HOURS)
+        return (self.coordinator.data or {}).get(self._register)
 
 
 class MedoleStatusSensor(MedoleBaseSensor):
@@ -197,9 +209,10 @@ class MedoleStatusSensor(MedoleBaseSensor):
     def __init__(self, coordinator: MedoleDataCoordinator, name: str) -> None:
         super().__init__(coordinator, name, "status")
         self._attr_name = "Status"
+        self._register = REG_OPERATION_STATUS
 
     def _status_value(self) -> int | None:
-        return (self.coordinator.data or {}).get(REG_OPERATION_STATUS)
+        return (self.coordinator.data or {}).get(self._register)
 
     def _mode(self, register: int) -> bool:
         return (self.coordinator.data or {}).get(register) == 1

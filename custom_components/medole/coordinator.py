@@ -18,32 +18,31 @@ from .const import (
     REG_FAN_OPERATION_HOURS,
     REG_FAN_SPEED,
     REG_HUMIDITY_1,
-    REG_HUMIDITY_2,
     REG_HUMIDITY_SETPOINT,
     REG_OPERATION_STATUS,
     REG_PIPE_TEMPERATURE,
     REG_POWER,
     REG_PURIFY_MODE,
     REG_TEMPERATURE_1,
-    REG_TEMPERATURE_2,
 )
 from .modbus import MedoleModbusClient
 
 _LOGGER = logging.getLogger(__name__)
 
-# The complete set of registers any platform entity currently reads.
-# Polled once per cycle in a single coordinator refresh — previously each
-# of the 8 entities issued its own independent read loop at 5 s intervals.
+# Read first each cycle. A failed probe means the device is unavailable; a
+# failure from any other register is isolated to the entity that consumes it.
+_PROBE_REGISTER = REG_OPERATION_STATUS
+
+# The complete set of registers any platform entity currently reads. Polled
+# once per cycle in a single coordinator refresh.
 REGISTERS_TO_POLL: tuple[int, ...] = (
-    REG_POWER,
     REG_OPERATION_STATUS,
+    REG_POWER,
     REG_HUMIDITY_SETPOINT,
     REG_DEHUMIDIFY_MODE,
     REG_PURIFY_MODE,
     REG_HUMIDITY_1,
-    REG_HUMIDITY_2,
     REG_TEMPERATURE_1,
-    REG_TEMPERATURE_2,
     REG_PIPE_TEMPERATURE,
     REG_FAN_OPERATION_HOURS,
     REG_FAN_ALARM_HOURS,
@@ -51,8 +50,8 @@ REGISTERS_TO_POLL: tuple[int, ...] = (
 )
 
 
-class MedoleDataCoordinator(DataUpdateCoordinator[dict[int, int]]):
-    """Polls all Medole registers in one cycle and fans out to entities."""
+class MedoleDataCoordinator(DataUpdateCoordinator[dict[int, int | None]]):
+    """Poll all Medole registers in one cycle and fan out to entities."""
 
     def __init__(
         self, hass: HomeAssistant, client: MedoleModbusClient, name: str
@@ -65,15 +64,19 @@ class MedoleDataCoordinator(DataUpdateCoordinator[dict[int, int]]):
         )
         self.client = client
 
-    async def _async_update_data(self) -> dict[int, int]:
-        """Read every polled register. Raises UpdateFailed on any failure."""
-        data: dict[int, int] = {}
+    async def _async_update_data(self) -> dict[int, int | None]:
+        """Read every register and fail only when the probe is unreadable."""
+        probe = await self.client.async_read_register(_PROBE_REGISTER)
+        if probe is None:
+            raise UpdateFailed(
+                "Failed to read operation status — device unreachable or "
+                "Modbus error"
+            )
+
+        data: dict[int, int | None] = {_PROBE_REGISTER: probe.registers[0]}
         for register in REGISTERS_TO_POLL:
+            if register == _PROBE_REGISTER:
+                continue
             result = await self.client.async_read_register(register)
-            if result is None:
-                raise UpdateFailed(
-                    f"Failed to read register 0x{register:04X} — device "
-                    "unreachable or Modbus error"
-                )
-            data[register] = result.registers[0]
+            data[register] = result.registers[0] if result is not None else None
         return data

@@ -35,6 +35,7 @@ def _fake_coordinator(data: dict, client=None) -> MagicMock:
     coord = MagicMock()
     coord.data = data
     coord.client = client if client is not None else MagicMock()
+    coord.last_update_success = True
 
     async def _refresh():
         return None
@@ -89,6 +90,18 @@ async def test_temperature_sensor_decoding():
     assert entity.native_value == pytest.approx(25.5)
 
 
+async def test_entities_unavailable_when_required_register_is_missing():
+    coordinator = _fake_coordinator({REG_OPERATION_STATUS: 0})
+
+    humidifier = MedoleDehumidifierHumidifier(coordinator, "unit")
+    temperature = MedoleTemperatureSensor(coordinator, "unit", 1)
+
+    assert humidifier.available is False
+    assert humidifier._attr_is_on is None
+    assert temperature.available is False
+    assert temperature.native_value is None
+
+
 async def test_fan_speed_select_read_and_write(fake_client):
     """Fan speed select reads current value and round-trips a write."""
     coordinator = _fake_coordinator(
@@ -100,3 +113,12 @@ async def test_fan_speed_select_read_and_write(fake_client):
 
     await entity.async_select_option("high")
     assert (REG_FAN_SPEED, FAN_SPEED_HIGH) in fake_client.writes
+
+
+async def test_fan_speed_select_rejects_invalid_option(fake_client):
+    coordinator = _fake_coordinator({}, client=fake_client)
+    entity = MedoleFanSpeedSelect(coordinator, "unit")
+
+    await entity.async_select_option("turbo")
+
+    assert fake_client.writes == []

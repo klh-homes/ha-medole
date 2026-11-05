@@ -82,6 +82,14 @@ class MedoleDehumidifierHumidifier(
         """Modbus client used for writes — reads go through the coordinator."""
         return self.coordinator.client
 
+    @property
+    def available(self) -> bool:
+        """Require both a successful refresh and a readable power register."""
+        return (
+            super().available
+            and (self.coordinator.data or {}).get(REG_POWER) is not None
+        )
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Pull fresh state from the coordinator and schedule an HA update."""
@@ -93,12 +101,12 @@ class MedoleDehumidifierHumidifier(
         data = self.coordinator.data or {}
 
         power = data.get(REG_POWER)
-        self._attr_is_on = power == 1
+        self._attr_is_on = None if power is None else power == 1
 
         status = data.get(REG_OPERATION_STATUS)
-        if status is None:
+        if status is None or self._attr_is_on is None:
             self._attr_action = None
-        elif not self._attr_is_on:
+        elif self._attr_is_on is False:
             self._attr_action = HumidifierAction.OFF
         elif status & STATUS_COMPRESSOR_ON:
             self._attr_action = HumidifierAction.DRYING
@@ -108,27 +116,30 @@ class MedoleDehumidifierHumidifier(
             self._attr_action = HumidifierAction.IDLE
 
         setpoint = data.get(REG_HUMIDITY_SETPOINT)
-        if setpoint is not None:
-            self._attr_target_humidity = (
+        self._attr_target_humidity = (
+            None
+            if setpoint is None
+            else (
                 MIN_HUMIDITY
                 if setpoint == CONTINUOUS_DEHUMIDIFICATION
                 else setpoint
             )
+        )
 
-        dehumidify_on = data.get(REG_DEHUMIDIFY_MODE) == 1
-        purify_on = data.get(REG_PURIFY_MODE) == 1
-        if dehumidify_on:
+        dehumidify_mode = data.get(REG_DEHUMIDIFY_MODE)
+        purify_mode = data.get(REG_PURIFY_MODE)
+        if dehumidify_mode == 1:
             self._current_preset = PRESET_MODE_DEHUMIDIFY
             self._attr_mode = PRESET_MODE_DEHUMIDIFY
-        elif purify_on:
+        elif purify_mode == 1:
             self._current_preset = PRESET_MODE_AIR_PURIFICATION
             self._attr_mode = PRESET_MODE_AIR_PURIFICATION
+        elif dehumidify_mode is None or purify_mode is None:
+            self._attr_mode = None
         else:
-            self._attr_mode = PRESET_MODE_DEHUMIDIFY
+            self._attr_mode = self._current_preset
 
-        humidity = data.get(REG_HUMIDITY_1)
-        if humidity is not None:
-            self._attr_current_humidity = humidity
+        self._attr_current_humidity = data.get(REG_HUMIDITY_1)
 
     async def async_set_mode(self, mode: str) -> None:
         """Set new mode."""

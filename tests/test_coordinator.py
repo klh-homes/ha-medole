@@ -2,7 +2,13 @@
 import pytest
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.medole.const import REG_HUMIDITY_1, REG_POWER
+from custom_components.medole.const import (
+    REG_HUMIDITY_1,
+    REG_HUMIDITY_2,
+    REG_OPERATION_STATUS,
+    REG_POWER,
+    REG_TEMPERATURE_2,
+)
 from custom_components.medole.coordinator import (
     REGISTERS_TO_POLL,
     MedoleDataCoordinator,
@@ -38,9 +44,23 @@ async def test_coordinator_reads_every_polled_register(fake_client):
 async def test_coordinator_raises_update_failed_when_device_unreachable(
     fake_client,
 ):
-    # fake_client.values is empty → async_read_register returns None for every
-    # register, which is how the client signals "device unreachable".
+    # An unreadable operation-status probe means the device is unreachable.
     coordinator = _CapturingCoordinator(fake_client)
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
+
+
+async def test_coordinator_tolerates_missing_non_probe_register(fake_client):
+    fake_client.values[REG_OPERATION_STATUS] = 1
+
+    coordinator = _CapturingCoordinator(fake_client)
+    data = await coordinator._async_update_data()
+
+    assert data[REG_OPERATION_STATUS] == 1
+    assert data[REG_POWER] is None
+
+
+def test_coordinator_does_not_poll_removed_secondary_sensors():
+    assert REG_TEMPERATURE_2 not in REGISTERS_TO_POLL
+    assert REG_HUMIDITY_2 not in REGISTERS_TO_POLL
